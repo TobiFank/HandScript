@@ -1,0 +1,51 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+      - ./data:/app/data
+      - backend_cache:/root/.cache
+      - transformers_cache:/root/.cache/huggingface/hub
+    environment:
+      - DATABASE_URL=sqlite:///./data/handscript.db
+      - STORAGE_PATH=/app/storage
+      - DEVICE=${DEVICE}
+      - DEFAULT_MODEL_ENGLISH=${DEFAULT_MODEL_ENGLISH}
+      - DEFAULT_MODEL_GERMAN=${DEFAULT_MODEL_GERMAN}
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api  # URL for browser access
+    depends_on:
+      - backend
+
+volumes:
+  backend_cache:
+    name: handscript_backend_cache
+  transformers_cache:
+    name: handscript_transformers_cache

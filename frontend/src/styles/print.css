@@ -1,0 +1,56 @@
+/* src/styles/print.css */
+@media print {
+    /* Hide non-printable elements */
+    .print\\:hidden {
+        display: none !important;
+    }
+
+    /* Reset background colors and shadows */
+    body {
+        background: white !important;
+    }
+
+    .bg-white,
+    .bg-gray-50,
+    .shadow-sm {
+        background: white !important;
+        box-shadow: none !important;
+    }
+
+    /* Ensure proper page breaks */
+    .page-break-after-always {
+        page-break-after: always;
+    }
+
+    /* Adjust typography for print */
+    .prose {
+        font-size: 12pt !important;
+        line-height: 1.6 !important;
+    }
+
+    h1 {
+        font-size: 18pt !important;
+        margin-bottom: 1em !important;
+    }
+
+    h2 {
+        font-size: 14pt !important;
+        margin-bottom: 0.5em !important;
+    }
+
+    /* Ensure links are readable */
+    a {
+        text-decoration: underline !important;
+        color: black !important;
+    }
+
+    /* Remove unnecessary spacing */
+    .p-8 {
+        padding: 0 !important;
+    }
+
+    /* Ensure proper margins */
+    @page {
+        margin: 2cm;
+    }
+}
