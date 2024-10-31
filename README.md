@@ -1,6 +1,6 @@
 # HandScript
 
-![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)
+![License: Custom Non-Commercial](https://img.shields.io/badge/License-Custom%20Non--Commercial-red.svg)
 
 HandScript is an intelligent handwriting recognition system that transforms handwritten documents into editable digital text, learning and adapting to your unique handwriting style.
 
@@ -167,13 +167,20 @@ yarn dev
 ```
 
 ## License
-This project is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License. The following components are licensed under different terms:
+This project is licensed under a Custom Non-Commercial, Contribution-Based License. 
 
+### Key Points:
+- **Private, non-commercial use** of this tool is permitted.
+- **Modifications or enhancements** must be contributed to this project (e.g., through pull requests) to be approved by the project maintainer.
+- **Commercial use** and creating derivative works for redistribution outside of this project are prohibited.
+
+For full details, please refer to the [LICENSE](LICENSE) file.
+
+### The following components are licensed under different terms:
 - [fhswf/TrOCR_german_handwritten](https://huggingface.co/fhswf/TrOCR_german_handwritten) is licensed under the Academic Free License 3.0. See [link](https://huggingface.co/fhswf/TrOCR_german_handwritten/tree/main).
 - [microsoft/trocr-large-handwritten](https://huggingface.co/microsoft/trocr-large-handwritten) is licensed under the MIT License. See [link](https://github.com/microsoft/unilm/blob/master/LICENSE).
 
 For more details, refer to the included license files and documentation.
-
 
 ## Acknowledgments
 
@@ -183,4 +190,5 @@ For more details, refer to the included license files and documentation.
 - FastAPI and React for the application framework
 - The open source community for various supporting libraries
 
----
+## Contributing
+We welcome contributions that enhance the tool! Please submit a pull request for any proposed changes or additions. All contributions must comply with the Custom Non-Commercial, Contribution-Based License outlined in the [LICENSE](LICENSE) file.
