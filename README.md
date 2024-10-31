@@ -159,6 +159,14 @@ handscript/
 
 ![Handscript Architecture](./docs/images/architecture.png)
 
+## Development
+### Backend Development
+```bash
+cd backend
+poetry install
+poetry run python run.py
+```
+
 ### Frontend Development
 ```bash
 cd frontend
