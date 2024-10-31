@@ -175,12 +175,13 @@ yarn dev
 ```
 
 ## License
-This project is licensed under a Custom Non-Commercial, Contribution-Based License. 
+This project is licensed under a Custom Non-Commercial, Contribution-Based License.
 
 ### Key Points:
 - **Private, non-commercial use** of this tool is permitted.
 - **Modifications or enhancements** must be contributed to this project (e.g., through pull requests) to be approved by the project maintainer.
 - **Commercial use** and creating derivative works for redistribution outside of this project are prohibited.
+- **Contact for Commercial Use**: Companies or individuals interested in commercial use should contact Tobias Fankhauser at [Your Contact Information] for case-by-case consideration.
 
 For full details, please refer to the [LICENSE](LICENSE) file.
 
@@ -191,7 +192,6 @@ For full details, please refer to the [LICENSE](LICENSE) file.
 For more details, refer to the included license files and documentation.
 
 ## Acknowledgments
-
 - Microsoft's TrOCR model for base recognition capabilities
 - FHSWF's TrOCR German model for additional language support
 - Hugging Face Transformers library
@@ -200,3 +200,6 @@ For more details, refer to the included license files and documentation.
 
 ## Contributing
 We welcome contributions that enhance the tool! Please submit a pull request for any proposed changes or additions. All contributions must comply with the Custom Non-Commercial, Contribution-Based License outlined in the [LICENSE](LICENSE) file.
+
+### Contributor License Agreement (CLA)
+By contributing, you agree to the terms outlined in the [CLA](CLA.md). This agreement ensures that all contributions can be used in any future version of the project, including potential commercial versions. Please read the CLA before submitting your pull request.
