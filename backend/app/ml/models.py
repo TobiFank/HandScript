@@ -139,23 +139,37 @@ class OCRModel:
                 generated_ids = self.model.generate(pixel_values, max_length=128, num_beams=4, early_stopping=True)
                 line_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
-                if line_text.strip():
-                    lines.append({
-                        'bbox': [
-                            segment.bbox.x1, segment.bbox.y1,
-                            segment.bbox.x2, segment.bbox.y2
-                        ],
-                        'text': line_text,
-                        'confidence': segment.bbox.confidence,
-                        'image': segment.image  # Add this line - pass the PIL image
-                    })
+                # Include the line regardless of whether text was recognized
+                lines.append({
+                    'bbox': [
+                        segment.bbox.x1, segment.bbox.y1,
+                        segment.bbox.x2, segment.bbox.y2
+                    ],
+                    'text': line_text.strip(),  # Store empty string if no text recognized
+                    'confidence': segment.bbox.confidence,
+                    'image': segment.image,
+                    'text_recognized': bool(line_text.strip())  # New flag indicating if text was recognized
+                })
 
             except Exception as e:
                 ml_logger.warning(f"Error processing line segment: {str(e)}")
-                continue
+                # Include the line even if processing failed
+                lines.append({
+                    'bbox': [
+                        segment.bbox.x1, segment.bbox.y1,
+                        segment.bbox.x2, segment.bbox.y2
+                    ],
+                    'text': '',
+                    'confidence': segment.bbox.confidence,
+                    'image': segment.image,
+                    'text_recognized': False
+                })
 
         return {
             'lines': lines,
-            'full_text': '\n'.join(line['text'] for line in lines)
+            'full_text': '\n'.join(line['text'] for line in lines if line['text']),
+            'total_lines': len(lines),
+            'lines_with_text': sum(1 for line in lines if line['text']),
+            'lines_without_text': sum(1 for line in lines if not line['text'])
         }
 

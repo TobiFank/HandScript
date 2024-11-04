@@ -56,7 +56,7 @@ class DocumentSegmenter:
         self._is_loaded = False
 
         # Configuration parameters
-        self.min_line_height = 10  # Minimum height for a valid line
+        self.min_line_height = 5  # Minimum height for a valid line
         self.vertical_overlap_threshold = 0.5  # Threshold for merging boxes vertically
         self.horizontal_merge_threshold = 50  # Maximum horizontal gap between words to merge
         self.min_word_confidence = 0.0  # Minimum confidence for word detection
