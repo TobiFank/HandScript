@@ -182,7 +182,10 @@ export function PageCard({page, writers, onEdit}: PageCardProps) {
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => reprocessPage.mutate(page.id)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            reprocessPage.mutate(page.id);
+                                        }}
                                         disabled={reprocessPage.isPending || currentStatus === 'processing'}
                                     >
                                         <RefreshCw
