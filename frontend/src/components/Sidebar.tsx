@@ -9,6 +9,7 @@ import NewProjectDialog from '@/components/dialogs/NewProjectDialog';
 import NewWriterDialog from '@/components/dialogs/NewWriterDialog';
 import {Button} from '@/components/ui/button';
 import {Separator} from '@/components/ui/separator';
+import {toast} from "sonner";
 
 export default function Sidebar() {
     const location = useLocation();
@@ -212,6 +213,25 @@ export default function Sidebar() {
                 open={showNewWriter}
                 onOpenChange={setShowNewWriter}
             />
+            <div className="flex-none p-4 border-t">
+                <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={async () => {
+                        try {
+                            const response = await writerApi.exportTrainingSamples();
+                            toast.success(
+                                `Successfully exported ${response.data.sample_count} training samples`
+                            );
+                        } catch (error) {
+                            toast.error('Failed to export training samples');
+                            console.error('Export error:', error);
+                        }
+                    }}
+                >
+                    Export Training Samples
+                </Button>
+            </div>
         </aside>
     );
 }

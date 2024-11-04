@@ -1,4 +1,6 @@
 # backend/app/api/training_samples.py
+import json
+import shutil
 from typing import List
 from uuid import uuid4
 
@@ -7,12 +9,12 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..models import Page
+from ..models import Page, Writer
 from ..models.training_sample import TrainingSample
 from ..schemas.training_sample import (
     TrainingSample as TrainingSampleSchema,
     TrainingSampleUpdate,
-    TrainingSampleWithLines
+    TrainingSampleWithLines, ExportResponse
 )
 from ..services.ocr import ocr_service
 from ..utils.files import save_upload_file, get_relative_path, delete_file, load_file_as_uploadfile
@@ -265,3 +267,95 @@ async def convert_page_to_sample(
         needs_review=False,  # Don't need review for pages converted to samples
         db=db
     )
+
+@router.get("/export", response_model=ExportResponse)
+async def export_training_samples(db: Session = Depends(get_db)):
+    """Export all reviewed training samples"""
+    try:
+        api_logger.info("Starting training samples export")
+
+        # Create export directory
+        export_base_dir = settings.STORAGE_PATH / "exported_training_samples"
+        if export_base_dir.exists():
+            shutil.rmtree(export_base_dir)
+        export_base_dir.mkdir(parents=True)
+
+        api_logger.info(f"Created export directory: {export_base_dir}")
+
+        # Get all reviewed training samples with their writers
+        samples = (
+            db.query(TrainingSample, Writer)
+            .join(Writer)
+            .filter(TrainingSample.needs_review == False)
+            .all()
+        )
+
+        api_logger.info(f"Found {len(samples)} samples to export")
+
+        metadata = []
+        exported_count = 0
+
+        for sample, writer in samples:
+            try:
+                # Create writer-specific directory
+                writer_dir = export_base_dir / f"writer_{writer.id}"
+                writer_dir.mkdir(exist_ok=True)
+
+                # Copy image file
+                source_path = settings.STORAGE_PATH / sample.image_path
+                if not source_path.exists():
+                    api_logger.warning(f"Source file not found: {source_path}")
+                    continue
+
+                # Create new filename based on sample ID
+                new_filename = f"sample_{sample.id}{source_path.suffix}"
+                dest_path = writer_dir / new_filename
+
+                shutil.copy2(source_path, dest_path)
+                exported_count += 1
+
+                # Add metadata
+                metadata.append({
+                    "image_path": str(dest_path.relative_to(export_base_dir)),
+                    "text": sample.text,
+                    "writer_id": writer.id,
+                    "writer_name": writer.name,
+                    "language": writer.language or "english",
+                    "sample_id": sample.id
+                })
+
+            except Exception as e:
+                api_logger.error(f"Error processing sample {sample.id}: {str(e)}")
+                continue
+
+        api_logger.info(f"Successfully exported {exported_count} samples")
+
+        # Write metadata file
+        metadata_path = export_base_dir / "metadata.json"
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+        # Create zip file
+        zip_path = str(export_base_dir) + ".zip"
+        shutil.make_archive(
+            str(export_base_dir),
+            'zip',
+            export_base_dir
+        )
+
+        # Clean up the unzipped directory
+        shutil.rmtree(export_base_dir)
+
+        return ExportResponse(
+            success=True,
+            sample_count=exported_count,
+            export_path=zip_path
+        )
+
+    except Exception as e:
+        api_logger.error(f"Export failed: {str(e)}")
+        return ExportResponse(
+            success=False,
+            sample_count=0,
+            export_path=""
+        )

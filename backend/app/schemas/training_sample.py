@@ -70,3 +70,9 @@ class TrainingSample(TrainingSampleBase, TimestampMixin):
 
     class Config:
         from_attributes = True
+
+
+class ExportResponse(BaseSchema):
+    success: bool
+    sample_count: int
+    export_path: str

@@ -1,4 +1,5 @@
 # backend/app/api/writers.py
+import json
 import shutil
 from typing import List
 
@@ -10,6 +11,7 @@ from ..database import get_db
 from ..models import Page, TrainingSample
 from ..models.writer import Writer
 from ..schemas.page import Writer as WriterSchema, WriterCreate, WriterUpdate
+from ..schemas.training_sample import ExportResponse
 from ..services.training import training_service
 from ..utils.files import save_upload_file, get_relative_path
 from ..utils.logging import api_logger
@@ -73,6 +75,7 @@ async def get_writer(writer_id: int, db: Session = Depends(get_db)):
         "status": writer.status
     })
     return writer
+
 
 @router.put("/{writer_id}", response_model=WriterSchema)
 async def update_writer(writer_id: int, writer: WriterUpdate, db: Session = Depends(get_db)):
@@ -322,6 +325,7 @@ async def get_training_status(writer_id: int, db: Session = Depends(get_db)):
     })
 
     return status_data
+
 
 @router.get("/{writer_id}/stats")
 async def get_writer_stats(writer_id: int, db: Session = Depends(get_db)):

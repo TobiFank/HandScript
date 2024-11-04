@@ -39,6 +39,6 @@ async def add_cors_headers(request: Request, call_next):
     response.headers["Access-Control-Expose-Headers"] = "Content-Type, Content-Length"
     return response
 
-@app.get("/")
+@app.get("/api")
 async def root():
     return {"message": "HandScript API is running"}

@@ -84,6 +84,12 @@ export interface WriterStats {
     }>;
 }
 
+export interface ExportResponse {
+    success: boolean;
+    sample_count: number;
+    export_path: string;
+}
+
 // Create axios instance with config
 const api = axios.create(API_CONFIG);
 
@@ -253,6 +259,8 @@ export const writerApi = {
         api.put<TrainingSample>(`/training-samples/${sampleId}`, {text}),
     update: (id: number, data: { name: string; language?: string }) =>
         api.put<Writer>(`/writers/${id}`, data),
+    exportTrainingSamples: () =>
+        api.get<ExportResponse>('/training-samples/export'),
 };
 
 // Types for component use
