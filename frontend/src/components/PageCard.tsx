@@ -202,7 +202,10 @@ export function PageCard({page, writers, onEdit}: PageCardProps) {
                                         variant="ghost"
                                         size="sm"
                                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                        onClick={() => setShowDeleteDialog(true)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setShowDeleteDialog(true);
+                                        }}
                                     >
                                         <Trash2 className="w-4 h-4 mr-2"/>
                                         Delete
