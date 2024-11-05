@@ -1,9 +1,12 @@
 # app/ml/layout_segmenter.py
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from scipy.signal import find_peaks, argrelmin
 from transformers import LayoutLMv3FeatureExtractor
 
 from .base_document_segmenter import BaseDocumentSegmenter
@@ -11,27 +14,43 @@ from .types import LineSegment, BoundingBox
 from ..utils.logging import ml_logger
 
 
+@dataclass
+class LineDetectionParams:
+    """Parameters for fine-tuning line detection"""
+    # Baseline detection
+    baseline_variation_tolerance: int = 2  # Keep this small
+    max_baseline_skew: float = 0.05  # Keep this for horizontal lines
+
+    # Text height analysis
+    min_text_height: int = 10  # Slightly increased
+    max_text_height: int = 40  # Keep this
+    min_line_spacing: int = 2  # Slightly increased
+    height_estimation_window: int = 20  # Keep this
+
+    # Horizontal text analysis
+    min_word_spacing: int = 5  # Keep this
+    horizontal_density_threshold: float = 0.015  # Slightly increased to avoid fragments
+
+    # Profile analysis
+    smoothing_window: int = 7  # Increased to reduce local variations
+    peak_prominence: float = 0.08  # Increased to be less sensitive
+    valley_depth: float = 0.04  # Increased to be less sensitive
+
+    # Valley detection
+    min_valley_width: int = 2  # Slightly increased
+    max_valley_width: int = 10  # Keep this
+
+    # Peak detection
+    peak_min_distance: int = 15  # Increased to match typical line spacing
+
+
 class LayoutSegmenter(BaseDocumentSegmenter):
-    """Document segmentation using hybrid approach for line detection"""
+    """Enhanced document segmentation optimized for handwritten text lines"""
 
     def __init__(self, device: str = None):
         super().__init__(device)
         self.feature_extractor = None
-        # Minimum height (in pixels) for a text line
-        # Set low for thin handwriting strokes
-        self.min_line_height = 2
-
-        # Minimum width (in pixels) for a text segment
-        # Reduced to catch shorter handwritten words
-        self.min_segment_width = 10
-
-        # Maximum vertical distance (in pixels) to merge nearby lines
-        # Increased to handle uneven handwriting
-        self.vertical_merge_threshold = 1
-
-        # Minimum text density threshold for line detection
-        # Lowered because handwriting is typically less dense than printed text
-        self.horizontal_density_threshold = 0.05
+        self.params = LineDetectionParams()
 
     def load(self):
         """Load required models and initialize resources"""
@@ -50,6 +69,200 @@ class LayoutSegmenter(BaseDocumentSegmenter):
             ml_logger.error(f"Failed to load LayoutSegmenter: {str(e)}")
             raise
 
+    def _preprocess_image(self, image: np.ndarray) -> np.ndarray:
+        """Improved preprocessing optimized for handwritten text"""
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image
+
+        # Enhanced contrast with more aggressive CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+
+        # Binary thresholding with Otsu's method
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        # Save debug image
+        cv2.imwrite('debug_preprocessed.png', binary)
+
+        return binary
+
+    def _compute_vertical_profile(self, binary_image: np.ndarray) -> np.ndarray:
+        """Improved vertical profile computation for handwritten text"""
+        height = binary_image.shape[0]
+
+        # Calculate raw profile
+        profile = np.sum(binary_image, axis=1).astype(np.float32)
+
+        # Normalize
+        if profile.max() > 0:
+            profile = profile / profile.max()
+
+        # Use smaller window Gaussian smoothing
+        kernel_size = self.params.smoothing_window
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # Ensure odd kernel size
+        profile = cv2.GaussianBlur(profile, (1, kernel_size), 0)
+
+        # Debug visualization
+        try:
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(15, 5))
+            plt.plot(profile)
+            plt.title("Vertical Profile")
+            # Add horizontal lines for thresholds
+            plt.axhline(y=self.params.valley_depth, color='r', linestyle='--', label='Valley Threshold')
+            plt.axhline(y=self.params.peak_prominence, color='g', linestyle='--', label='Peak Threshold')
+            plt.legend()
+            plt.savefig('debug_profile.png')
+            plt.close()
+        except Exception as e:
+            ml_logger.warning(f"Failed to save debug profile: {str(e)}")
+
+        return profile
+
+    def _detect_text_lines(self, binary_image: np.ndarray,
+                           vertical_profile: np.ndarray) -> List[Tuple[int, int]]:
+        """Enhanced text line detection using valley detection"""
+        profile = vertical_profile.flatten()
+        height = len(profile)
+
+        # Find valleys (local minima)
+        valleys = argrelmin(profile, order=self.params.smoothing_window)[0]
+
+        # Find peaks (local maxima)
+        peaks, _ = find_peaks(
+            profile,
+            distance=self.params.peak_min_distance,
+            prominence=self.params.peak_prominence
+        )
+
+        # Combine peaks and valleys to determine line regions
+        line_regions = []
+
+        # Add image top if needed
+        if peaks[0] > self.params.min_text_height:
+            peaks = np.insert(peaks, 0, 0)
+
+        # Add image bottom if needed
+        if peaks[-1] < height - self.params.min_text_height:
+            peaks = np.append(peaks, height - 1)
+
+        # Create line regions between valleys
+        for i in range(len(valleys) - 1):
+            start = valleys[i]
+            end = valleys[i + 1]
+
+            # Check if there's a peak between these valleys
+            peaks_between = peaks[(peaks > start) & (peaks < end)]
+
+            if len(peaks_between) > 0:
+                # Expand region slightly
+                region_start = max(0, start - 2)
+                region_end = min(height - 1, end + 2)
+
+                # Verify region
+                region_height = region_end - region_start
+                if region_height >= self.params.min_text_height:
+                    # Check density
+                    region = binary_image[region_start:region_end, :]
+                    density = np.sum(region) / region.size
+
+                    if density > self.params.horizontal_density_threshold:
+                        line_regions.append((region_start, region_end))
+
+        # Debug visualization
+        try:
+            debug_img = binary_image.copy()
+            if len(debug_img.shape) == 2:
+                debug_img = cv2.cvtColor(debug_img, cv2.COLOR_GRAY2BGR)
+
+            # Draw detected lines
+            for start, end in line_regions:
+                cv2.line(debug_img, (0, start), (binary_image.shape[1], start), (0, 255, 0), 1)
+                cv2.line(debug_img, (0, end), (binary_image.shape[1], end), (0, 0, 255), 1)
+
+            cv2.imwrite('debug_lines.png', debug_img)
+
+            # Save profile with detected regions
+            plt.figure(figsize=(15, 5))
+            plt.plot(profile)
+            plt.vlines(valleys, 0, 1, colors='r', linestyles='dashed', label='Valleys')
+            plt.vlines(peaks, 0, 1, colors='g', linestyles='dashed', label='Peaks')
+            plt.title("Profile with Detected Regions")
+            plt.legend()
+            plt.savefig('debug_regions.png')
+            plt.close()
+
+        except Exception as e:
+            ml_logger.warning(f"Failed to save debug images: {str(e)}")
+
+        return line_regions
+
+    def _analyze_line_components(self, binary_image: np.ndarray,
+                                 y1: int, y2: int) -> Optional[Tuple[int, int]]:
+        """Analyze components within a line region"""
+        line_region = binary_image[y1:y2, :]
+
+        # Simple horizontal bounds
+        col_profile = np.sum(line_region, axis=0) > 0
+        cols = np.where(col_profile)[0]
+
+        if len(cols) == 0:
+            return None
+
+        x1, x2 = cols[0], cols[-1]
+        return (x1, x2)
+
+    def segment_page(self, image: Image.Image) -> List[LineSegment]:
+        """Segment page into text lines with improved handling of handwritten text"""
+        if not self._is_loaded:
+            self.load()
+
+        try:
+            # Convert and preprocess
+            image_np = np.array(image)
+            binary = self._preprocess_image(image_np)
+
+            # Compute vertical profile
+            vertical_profile = self._compute_vertical_profile(binary)
+
+            # Detect line regions
+            line_regions = self._detect_text_lines(binary, vertical_profile)
+
+            ml_logger.info(f"Detected {len(line_regions)} initial line regions")
+
+            # Process each line region
+            line_segments = []
+            for y1, y2 in line_regions:
+                x_bounds = self._analyze_line_components(binary, y1, y2)
+
+                if x_bounds is None:
+                    continue
+
+                x1, x2 = x_bounds
+
+                # Increased padding for bounding boxes
+                bbox = BoundingBox(
+                    x1=max(0, int(x1) - 5),  # Increased horizontal padding
+                    y1=max(0, int(y1) - 3),  # Increased top padding
+                    x2=min(image_np.shape[1], int(x2) + 5),  # Increased horizontal padding
+                    y2=min(image_np.shape[0], int(y2) + 4),  # Increased bottom padding slightly more
+                    confidence=1.0
+                )
+
+                # Extract line image
+                line_image = image.crop((bbox.x1, bbox.y1, bbox.x2, bbox.y2))
+                line_segments.append(LineSegment(image=line_image, bbox=bbox))
+
+            ml_logger.info(f"Final number of line segments: {len(line_segments)}")
+            return line_segments
+
+        except Exception as e:
+            ml_logger.error(f"Error during page segmentation: {str(e)}")
+            raise
+
     def unload(self):
         """Unload models and clean up resources"""
         if self._is_loaded:
@@ -57,174 +270,9 @@ class LayoutSegmenter(BaseDocumentSegmenter):
                 if self.feature_extractor is not None:
                     del self.feature_extractor
                     self.feature_extractor = None
-
                 self._cleanup_gpu_memory()
                 self._is_loaded = False
                 ml_logger.info("LayoutSegmenter unloaded successfully")
-
             except Exception as e:
                 ml_logger.error(f"Error during LayoutSegmenter unloading: {str(e)}")
                 raise
-
-    def _analyze_horizontal_density(self, binary_image: np.ndarray, y1: int, y2: int) -> List[Tuple[int, int]]:
-        """Analyze horizontal text density to find real text segments"""
-        line_region = binary_image[y1:y2, :]
-        horizontal_profile = np.sum(line_region, axis=0) > 0
-
-        # Find continuous text segments
-        segments = []
-        start = None
-
-        for x, val in enumerate(horizontal_profile):
-            if val and start is None:
-                start = x
-            elif (not val or x == len(horizontal_profile) - 1) and start is not None:
-                end = x if not val else x + 1
-                if end - start >= self.min_segment_width:
-                    segments.append((start, end))
-                start = None
-
-        return segments
-
-    def _merge_line_segments(self, lines: List[Tuple[int, int]],
-                             binary_image: np.ndarray) -> List[Tuple[int, int]]:
-        """Merge line segments that are likely part of the same line"""
-        if not lines:
-            return lines
-
-        merged_lines = []
-        current_line = lines[0]
-
-        for next_line in lines[1:]:
-            if self._should_merge_lines(current_line, next_line, binary_image):
-                # Merge lines
-                current_line = (current_line[0], next_line[1])
-            else:
-                merged_lines.append(current_line)
-                current_line = next_line
-
-        merged_lines.append(current_line)
-        return merged_lines
-
-    def _preprocess_image(self, image: np.ndarray) -> np.ndarray:
-        """Enhanced preprocessing optimized for handwritten text"""
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = image
-
-        # Enhance contrast to better separate text from background
-        gray = cv2.convertScaleAbs(gray, alpha=1.2, beta=0)
-
-        # Use adaptive thresholding instead of Otsu's
-        # Better handles varying stroke intensities in handwriting
-        binary = cv2.adaptiveThreshold(
-            gray,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV,
-            blockSize=25,  # Adjust based on typical text size
-            C=10
-        )
-
-        # Minimal noise removal to preserve handwriting details
-        kernel = np.ones((2, 2), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-
-        # Light dilation to connect broken strokes
-        kernel_vertical = np.ones((2, 1), np.uint8)
-        binary = cv2.dilate(binary, kernel_vertical, iterations=1)
-
-        return binary
-
-    def _should_merge_lines(self, line1: Tuple[int, int], line2: Tuple[int, int],
-                            binary_image: np.ndarray) -> bool:
-        """Determine if two line segments should be merged, optimized for handwriting"""
-        y1_end = line1[1]
-        y2_start = line2[0]
-
-        # Increased threshold for vertical gaps in handwriting
-        if y2_start - y1_end > self.vertical_merge_threshold:
-            return False
-
-        region1 = binary_image[line1[0]:line1[1], :]
-        region2 = binary_image[line2[0]:line2[1], :]
-
-        density1 = np.sum(region1) / region1.size
-        density2 = np.sum(region2) / region2.size
-
-        avg_density = (density1 + density2) / 2
-        density_ratio = min(density1, density2) / max(density1, density2)
-
-        horizontal_profile1 = np.sum(region1, axis=0) > 0
-        horizontal_profile2 = np.sum(region2, axis=0) > 0
-
-        overlap = np.sum(horizontal_profile1 & horizontal_profile2)
-        max_width = max(np.sum(horizontal_profile1), np.sum(horizontal_profile2))
-
-        overlap_ratio = overlap / max_width if max_width > 0 else 0
-
-        # More lenient merging criteria for handwriting
-        # Density ratio threshold increased to handle varying stroke weights
-        # Overlap ratio threshold decreased to handle uneven baselines
-        return (density_ratio < 0.4 or overlap_ratio > 0.2) and avg_density > self.horizontal_density_threshold
-
-    def segment_page(self, image: Image.Image) -> List[LineSegment]:
-        """Segment page with parameters optimized for handwritten text"""
-        if not self._is_loaded:
-            self.load()
-
-        try:
-            image_np = np.array(image)
-            binary = self._preprocess_image(image_np)
-
-            # Vertical profile with gentler smoothing
-            vertical_profile = np.sum(binary, axis=1)
-            kernel_size = 5  # Increased for more stable line detection
-            vertical_profile = np.convolve(
-                vertical_profile,
-                np.ones(kernel_size) / kernel_size,
-                mode='same'
-            )
-
-            # Lower threshold for detecting handwritten lines
-            min_value = np.mean(vertical_profile[vertical_profile > 0]) * 0.15
-            lines = []
-            start = None
-
-            for i, val in enumerate(vertical_profile):
-                if val > min_value and start is None:
-                    start = i
-                elif (val <= min_value or i == len(vertical_profile) - 1) and start is not None:
-                    if i - start >= self.min_line_height:
-                        lines.append((start, i))
-                    start = None
-
-            merged_lines = self._merge_line_segments(lines, binary)
-
-            # Create line segments with increased padding for handwriting
-            line_segments = []
-            for y1, y2 in merged_lines:
-                text_segments = self._analyze_horizontal_density(binary, y1, y2)
-
-                if text_segments:
-                    # Increased padding to catch descenders and ascenders
-                    x1 = max(0, min(seg[0] for seg in text_segments) - 8)
-                    x2 = min(image_np.shape[1], max(seg[1] for seg in text_segments) + 8)
-
-                    bbox = BoundingBox(
-                        x1=int(x1),
-                        y1=int(max(0, y1 - 4)),  # Increased vertical padding
-                        x2=int(x2),
-                        y2=int(min(image_np.shape[0], y2 + 4)),  # Increased vertical padding
-                        confidence=1.0
-                    )
-
-                    line_image = image.crop((bbox.x1, bbox.y1, bbox.x2, bbox.y2))
-                    line_segments.append(LineSegment(image=line_image, bbox=bbox))
-
-            return line_segments
-
-        except Exception as e:
-            ml_logger.error(f"Error during page segmentation: {str(e)}")
-            raise

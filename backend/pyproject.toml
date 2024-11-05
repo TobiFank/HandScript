@@ -38,6 +38,8 @@ python-doctr = {extras = ["torch"], version = "^0.10.0"}
 gputil = "^1.4.0"
 jiwer = "^3.0.4"
 opencv-python = "^4.10.0.84"
+matplotlib = "^3.9.2"
+seaborn = "^0.13.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
