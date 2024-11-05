@@ -6,8 +6,8 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-from scipy.signal import find_peaks, argrelmin
 from transformers import LayoutLMv3FeatureExtractor
+from scipy.signal import find_peaks, argrelmin, savgol_filter
 
 from .base_document_segmenter import BaseDocumentSegmenter
 from .types import LineSegment, BoundingBox
@@ -89,9 +89,7 @@ class LayoutSegmenter(BaseDocumentSegmenter):
         return binary
 
     def _compute_vertical_profile(self, binary_image: np.ndarray) -> np.ndarray:
-        """Improved vertical profile computation for handwritten text"""
-        height = binary_image.shape[0]
-
+        """Improved vertical profile computation with better smoothing"""
         # Calculate raw profile
         profile = np.sum(binary_image, axis=1).astype(np.float32)
 
@@ -99,124 +97,102 @@ class LayoutSegmenter(BaseDocumentSegmenter):
         if profile.max() > 0:
             profile = profile / profile.max()
 
-        # Use smaller window Gaussian smoothing
-        kernel_size = self.params.smoothing_window
-        if kernel_size % 2 == 0:
-            kernel_size += 1  # Ensure odd kernel size
-        profile = cv2.GaussianBlur(profile, (1, kernel_size), 0)
+        # Apply Savitzky-Golay filter for better smoothing
+        window = 21  # Increased window size
+        profile_smooth = savgol_filter(profile, window, 3)
 
         # Debug visualization
         try:
             import matplotlib.pyplot as plt
             plt.figure(figsize=(15, 5))
-            plt.plot(profile)
+            plt.plot(profile, 'b-', alpha=0.5, label='Original')
+            plt.plot(profile_smooth, 'r-', label='Smoothed')
             plt.title("Vertical Profile")
-            # Add horizontal lines for thresholds
-            plt.axhline(y=self.params.valley_depth, color='r', linestyle='--', label='Valley Threshold')
-            plt.axhline(y=self.params.peak_prominence, color='g', linestyle='--', label='Peak Threshold')
             plt.legend()
             plt.savefig('debug_profile.png')
             plt.close()
         except Exception as e:
             ml_logger.warning(f"Failed to save debug profile: {str(e)}")
 
-        return profile
+        return profile_smooth
 
     def _detect_text_lines(self, binary_image: np.ndarray,
                            vertical_profile: np.ndarray) -> List[Tuple[int, int]]:
-        """Enhanced text line detection using valley detection"""
+        """Enhanced text line detection with better valley identification"""
         profile = vertical_profile.flatten()
         height = len(profile)
 
-        # Find valleys (local minima)
-        valleys = argrelmin(profile, order=self.params.smoothing_window)[0]
-
-        # Find peaks (local maxima)
-        peaks, _ = find_peaks(
+        # Find the peaks (text line centers)
+        peaks, peak_properties = find_peaks(
             profile,
             distance=self.params.peak_min_distance,
-            prominence=self.params.peak_prominence
+            prominence=self.params.peak_prominence,
+            width=5  # Added width parameter
         )
 
-        # Combine peaks and valleys to determine line regions
+        # Calculate the typical line height from peak widths
+        peak_widths = peak_properties["widths"]
+        typical_height = int(np.median(peak_widths) * 2.5)  # Use 2.5x the peak width
+
+        # Create line regions based on peaks
         line_regions = []
+        for i, peak in enumerate(peaks):
+            # Calculate region bounds using typical height
+            half_height = typical_height // 2
+            start = max(0, peak - half_height)
+            end = min(height - 1, peak + half_height)
 
-        # Add image top if needed
-        if peaks[0] > self.params.min_text_height:
-            peaks = np.insert(peaks, 0, 0)
+            # Extend to local minima
+            # Look for local minimum above
+            local_profile = profile[max(0, start-5):peak]
+            if len(local_profile) > 0:
+                local_min = max(0, start-5 + np.argmin(local_profile))
+                start = local_min
 
-        # Add image bottom if needed
-        if peaks[-1] < height - self.params.min_text_height:
-            peaks = np.append(peaks, height - 1)
+            # Look for local minimum below
+            local_profile = profile[peak:min(height, end+5)]
+            if len(local_profile) > 0:
+                local_min = peak + np.argmin(local_profile)
+                end = min(height-1, local_min)
 
-        # Create line regions between valleys
-        for i in range(len(valleys) - 1):
-            start = valleys[i]
-            end = valleys[i + 1]
-
-            # Check if there's a peak between these valleys
-            peaks_between = peaks[(peaks > start) & (peaks < end)]
-
-            if len(peaks_between) > 0:
-                # Expand region slightly
-                region_start = max(0, start - 2)
-                region_end = min(height - 1, end + 2)
-
-                # Verify region
-                region_height = region_end - region_start
-                if region_height >= self.params.min_text_height:
-                    # Check density
-                    region = binary_image[region_start:region_end, :]
-                    density = np.sum(region) / region.size
-
-                    if density > self.params.horizontal_density_threshold:
-                        line_regions.append((region_start, region_end))
-
-        # Debug visualization
-        try:
-            debug_img = binary_image.copy()
-            if len(debug_img.shape) == 2:
-                debug_img = cv2.cvtColor(debug_img, cv2.COLOR_GRAY2BGR)
-
-            # Draw detected lines
-            for start, end in line_regions:
-                cv2.line(debug_img, (0, start), (binary_image.shape[1], start), (0, 255, 0), 1)
-                cv2.line(debug_img, (0, end), (binary_image.shape[1], end), (0, 0, 255), 1)
-
-            cv2.imwrite('debug_lines.png', debug_img)
-
-            # Save profile with detected regions
-            plt.figure(figsize=(15, 5))
-            plt.plot(profile)
-            plt.vlines(valleys, 0, 1, colors='r', linestyles='dashed', label='Valleys')
-            plt.vlines(peaks, 0, 1, colors='g', linestyles='dashed', label='Peaks')
-            plt.title("Profile with Detected Regions")
-            plt.legend()
-            plt.savefig('debug_regions.png')
-            plt.close()
-
-        except Exception as e:
-            ml_logger.warning(f"Failed to save debug images: {str(e)}")
+            # Add the region if it doesn't overlap significantly with previous regions
+            if not line_regions or start > line_regions[-1][1] - typical_height * 0.1:
+                line_regions.append((start, end))
 
         return line_regions
 
     def _analyze_line_components(self, binary_image: np.ndarray,
                                  y1: int, y2: int) -> Optional[Tuple[int, int]]:
-        """Analyze components within a line region"""
+        """Improved component analysis to avoid horizontal cuts"""
         line_region = binary_image[y1:y2, :]
 
-        # Simple horizontal bounds
-        col_profile = np.sum(line_region, axis=0) > 0
-        cols = np.where(col_profile)[0]
+        # Use horizontal projection to find text bounds
+        horiz_proj = np.sum(line_region, axis=0) > 0
 
-        if len(cols) == 0:
-            return None
+        # Find continuous text regions
+        transitions = np.diff(horiz_proj.astype(int))
+        starts = np.where(transitions == 1)[0] + 1
+        ends = np.where(transitions == -1)[0] + 1
 
-        x1, x2 = cols[0], cols[-1]
+        if len(starts) == 0 or len(ends) == 0:
+            # Use full width if no clear transitions
+            cols = np.where(horiz_proj)[0]
+            if len(cols) == 0:
+                return None
+            return (cols[0], cols[-1])
+
+        # Take the leftmost start and rightmost end
+        x1 = starts[0]
+        x2 = ends[-1]
+
+        # Add extra padding for safety
+        x1 = max(0, x1 - 10)
+        x2 = min(binary_image.shape[1], x2 + 10)
+
         return (x1, x2)
 
     def segment_page(self, image: Image.Image) -> List[LineSegment]:
-        """Segment page into text lines with improved handling of handwritten text"""
+        """Segment page into text lines with improved handling"""
         if not self._is_loaded:
             self.load()
 
@@ -243,12 +219,12 @@ class LayoutSegmenter(BaseDocumentSegmenter):
 
                 x1, x2 = x_bounds
 
-                # Increased padding for bounding boxes
+                # Create bounding box with generous padding
                 bbox = BoundingBox(
-                    x1=max(0, int(x1) - 5),  # Increased horizontal padding
-                    y1=max(0, int(y1) - 3),  # Increased top padding
-                    x2=min(image_np.shape[1], int(x2) + 5),  # Increased horizontal padding
-                    y2=min(image_np.shape[0], int(y2) + 4),  # Increased bottom padding slightly more
+                    x1=max(0, int(x1) - 15),  # Increased horizontal padding
+                    y1=max(0, int(y1) - 5),   # Increased top padding
+                    x2=min(image_np.shape[1], int(x2) + 15),  # Increased horizontal padding
+                    y2=min(image_np.shape[0], int(y2) + 6),   # Slightly more bottom padding
                     confidence=1.0
                 )
 
