@@ -222,9 +222,9 @@ class LayoutSegmenter(BaseDocumentSegmenter):
                 # Create bounding box with generous padding
                 bbox = BoundingBox(
                     x1=max(0, int(x1) - 15),  # Increased horizontal padding
-                    y1=max(0, int(y1) - 5),   # Increased top padding
+                    y1=max(0, int(y1) - 15),   # Increased top padding
                     x2=min(image_np.shape[1], int(x2) + 15),  # Increased horizontal padding
-                    y2=min(image_np.shape[0], int(y2) + 6),   # Slightly more bottom padding
+                    y2=min(image_np.shape[0], int(y2) + 15),   # Slightly more bottom padding
                     confidence=1.0
                 )
 
