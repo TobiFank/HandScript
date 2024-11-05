@@ -11,7 +11,7 @@ from PIL import Image
 from ..config import settings
 from ..ml.factory import ModelNameFactory
 from ..ml.models import OCRModel
-from ..ml.segmentation import LineSegment
+from ..ml.types import LineSegment
 from ..models import Writer
 from ..utils.logging import service_logger
 
