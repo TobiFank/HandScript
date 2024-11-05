@@ -10,7 +10,7 @@ from transformers import (
     VisionEncoderDecoderModel
 )
 
-from .segmentation import DocumentSegmenter
+from .segmentation import create_segmenter
 from ..utils.logging import ml_logger
 
 
@@ -26,7 +26,7 @@ class OCRModel:
         self.lora_path = lora_path
         self.processor = None
         self.model = None
-        self.segmenter = DocumentSegmenter(device=self.device)
+        self.segmenter = create_segmenter("layout", self.device)
         self._is_loaded = False
 
     def load(self):
@@ -172,4 +172,3 @@ class OCRModel:
             'lines_with_text': sum(1 for line in lines if line['text']),
             'lines_without_text': sum(1 for line in lines if not line['text'])
         }
-

@@ -37,6 +37,7 @@ sentencepiece = "^0.2.0"
 python-doctr = {extras = ["torch"], version = "^0.10.0"}
 gputil = "^1.4.0"
 jiwer = "^3.0.4"
+opencv-python = "^4.10.0.84"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
