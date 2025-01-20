@@ -1,6 +1,7 @@
 # HandScript
 
 ![License: Custom Non-Commercial](https://img.shields.io/badge/License-Custom%20Non--Commercial-red.svg)
+[![Project Status: Alpha](https://img.shields.io/badge/Project%20Status-Alpha-yellow.svg)](README.md)
 
 HandScript is an intelligent handwriting recognition system that transforms handwritten documents into editable digital text, learning and adapting to your unique handwriting style.
 
